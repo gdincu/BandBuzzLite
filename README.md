@@ -1,100 +1,107 @@
 # BandBuzzLite
 
-Sub-800KB notifier for the Xiaomi Smart Band 8 Active. Same card protocol
-as [BandBuzz](../BandBuzz) (`XiaomiProto` / `XiaomiCrypto` / `XiaomiFrame`
-are verbatim ports — `--selftest` vectors prove it), but with **zero
-`Microsoft.Windows.SDK.NET.dll`**: the default transport is hand-rolled raw
-WinRT interop (plain COM activation + ComWrappers source-gen, BCL only),
-connecting straight from LE advertisements — so it reaches bands Windows
-never listed. The BLE side needs no install step, no identity package, no
-certificate; only toast watching does (see Use).
+Lightweight notifier for the **Xiaomi Smart Band 8 Active** — forwards Windows notifications (e.g. Chrome, Teams) to your band as cards.
 
-`dotnet publish -c Release -o publish` → ~600KB total
-(`BandBuzzLite.exe` + `BandBuzzLite.dll`). Needs the .NET 9 runtime.
+Same card protocol as [BandBuzz](../BandBuzz) (`XiaomiProto` / `XiaomiCrypto` / `XiaomiFrame` are verbatim ports), but packaged as a sub-800 KB single-purpose tool with no extra runtime baggage. It connects directly from Bluetooth LE advertisements, so Windows doesn't need to "see" the band first.
 
-## Use
+`dotnet publish -c Release -o publish` → ~600 KB total (`BandBuzzLite.exe` + `BandBuzzLite.dll`). Requires the .NET 9 runtime.
 
-First, put your band's real MAC and auth key in `appsettings.json` next to
-the exe (the file ships with placeholders; find the MAC with `--scan` or the
-Mi Fitness app). One-shot cards then work unpackaged, straight after publish:
+## Quick start
+
+### 1. Configure your band
+
+Edit `appsettings.json` next to the exe and set your band's real values:
+
+```json
+{
+  "Mac": "AA:BB:CC:DD:EE:FF",
+  "AuthKey": "00000000000000000000000000000000",
+  "Filters": [ "Chrome", "Teams" ]
+}
+```
+
+* `Mac` — find it with `BandBuzzLite --scan` or in the Mi Fitness app.
+* `AuthKey` — 32 hex characters from the band pairing (same as BandBuzz).
+* `Filters` — which apps to forward when in watch mode.
+
+You can also override on the command line: `--mac AA:BB:CC:DD:EE:FF --key <32-hex> --filter Chrome,Teams`
+
+> No Bluetooth pairing needed. The default transport scans for the band's advertisements directly, just like the full BandBuzz app.
+
+### 2. Send a test card (no install needed)
+
+This works right after publish, without any setup:
 
 ```powershell
 dotnet publish src\BandBuzzLite\BandBuzzLite.csproj -c Release -o publish
 .\publish\BandBuzzLite.exe --test "Hello" "It works"
 ```
 
-Watch mode (the default) and `--list` need toast access, which Windows only
-grants to the installed identity package — one command, safe to re-run.
-Everything else works unpackaged:
+Check the band screen — the card stays until overwritten or dismissed. If anything goes wrong, the log tells you exactly which step failed.
+
+### 3. Forward live notifications (one-time install)
+
+Watch mode reads Windows toast notifications, which requires a one-time identity registration:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
-.\publish\BandBuzzLite.exe            # watch Chrome/Teams -> band
+.\publish\BandBuzzLite.exe            # now forwarding Chrome/Teams -> band
 ```
 
-| What | Command |
+`install.ps1` is safe to re-run and handles publishing, packaging, and registration for you. Everything else (`--test`, `--scan`, `--diag`, etc.) works without it.
+
+To stop watching, press `Ctrl+C`.
+
+## Commands
+
+| Command | What it does |
 |---|---|
-| Watch and forward (the normal mode) | `BandBuzzLite` |
-| See what Windows is showing right now | `BandBuzzLite --list` |
-| Send a one-off test card (no install) | `BandBuzzLite --test "Title" "Body" [app]` |
-| Hardware-free crypto/framing checks | `BandBuzzLite --selftest` |
-| Interop self-test (no band needed) | `BandBuzzLite --winrtcheck` |
-| Environment + access troubleshooter | `BandBuzzLite --diag` |
-| List known Bluetooth devices | `BandBuzzLite --scan` |
+| `BandBuzzLite` | Watch and forward notifications (default) |
+| `BandBuzzLite --list` | Show what Windows is displaying right now |
+| `BandBuzzLite --test "Title" "Body" [app]` | Send a one-off test card |
+| `BandBuzzLite --scan` | List known Bluetooth devices (to find the MAC) |
+| `BandBuzzLite --diag` | Check setup and permissions |
+| `BandBuzzLite --selftest` | Hardware-free crypto/framing checks |
+| `BandBuzzLite --winrtcheck` | Check the Bluetooth stack (no band needed) |
 
-Settings live in `appsettings.json` next to the exe (same shape as BandBuzz:
-`Mac`, `AuthKey`, `MaxWrite`, …), overridable with
-`--mac AA:BB:CC:DD:EE:FF --key <32-hex>`. Nothing is baked into the binary:
-missing/placeholder config fails validation up front.
+Run `BandBuzzLite --help` for all options. Add `--win32` to use the legacy transport that only sees paired/remembered devices.
 
-No pairing needed: the default transport scans for the band's
-advertisements directly (same as the full BandBuzz app). A legacy
-`--win32` flag keeps the raw Win32 GATT transport, which only sees
-paired/remembered devices.
+## Settings
 
-## Status
+All settings live in `appsettings.json` next to the exe:
 
-- ✅ builds with 0 warnings / 0 errors (`net9.0`, x64, CsWin32 0.3.346)
-- ✅ `--selftest`, `--winrtcheck`, `--list` (live toasts), install + `--diag`
-  all verified; every computed IID runtime-asserted via `GetIids`
-- ⚠️ **end-to-end send against a real band is the one remaining check.**
-  Run `--test`; if the GATT handshake misbehaves, the log pinpoints which
-  primitive failed (every QI is asserted, every async op is named).
+* `Mac`, `AuthKey` — band identity
+* `Filters` — app names to forward (partial match, e.g. `Chrome` matches `Google Chrome`)
+* `DedupSeconds` — ignore duplicate toasts within this window (default `10`)
+* `ReconnectSeconds` — retry delay if the band is out of range (default `5`)
+* `MaxWrite` — BLE chunk size (default `244`)
 
-## How the raw WinRT interop works (and why to trust it)
+Missing or placeholder values fail fast with a clear message — nothing is baked into the binary.
 
-`Band/WinRt*.cs` reimplements the 5% of the WinRT projection BandBuzz uses
-— activate `BluetoothLEAdvertisementWatcher` / `BluetoothLEDevice`,
-`IAsyncOperation` polling (no callbacks), `IBuffer` via the system Buffer
-factory, `ValueChanged`/`Received` via two tiny CCW delegates — on top of
-`RoGetActivationFactory`/`RoActivateInstance` + source-generated ComWrappers.
-Interface IIDs and vtable orders were taken from `Windows.winmd`; the 8
-generic-instantiation IIDs were computed with the `winrt/base.h` pinterface
-algorithm and cross-checked 6/6 against .NET's own WinRT oracle, and every
-computed IID is re-asserted at runtime via `GetIids` membership, so a wrong
-IID fails fast instead of corrupting calls.
+## Troubleshooting
 
-`--winrtcheck` exercises all of this live (activate, scan Start/Stop, CCW
-add/remove, a bogus-address async op, Buffer roundtrip) with no band.
+* **`--diag` is your friend** — it reports OS version, package identity, toast access, Bluetooth radio, and your current config in one view.
+* **No toasts in `--list` or watch mode?** Make sure the identity package is installed (`install.ps1`) and that Windows allows notification access: *Settings → Privacy & security → Notifications → allow apps to access notifications*, then re-run `--diag` until it says `Allowed`.
+* **Band not found?** Run `--scan` to confirm the MAC, double-check `appsettings.json`, and make sure the band is advertising (screen on, nearby). The default transport needs no pairing; only `--win32` requires the band to be paired in Windows Settings.
+* **Still stuck?** Run `--test` — it logs each connection step so you can see where it stops.
 
-Known tradeoffs (documented in code, not hidden):
+## How it works
 
-- Async WinRT ops are polled, not completed via callbacks (simpler, no
-  extra CCWs; adds ≤25ms latency per op — irrelevant for a sender).
-- COM refcounts from QI are left to GC/finalizers; event registrations,
-  watcher and device are torn down explicitly via API. Fine for a
-  short-lived sender process.
-- x64-only v1 (the CsWin32 half has pointer-size-dependent layout).
+* `Band/Xiaomi*.cs` — notification protocol (ported from BandBuzz)
+* `Band/WinRt*.cs` — default Bluetooth transport using raw WinRT interop (no heavy projection DLL), connecting straight from advertisements
+* `Band/Win32*.cs` — legacy Win32 GATT transport (`--win32` flag)
+
+`--winrtcheck` and `--selftest` let you verify the stack without a band.
 
 ## Layout
 
-- `src/BandBuzzLite/Band/Xiaomi*.cs` — protocol, verbatim from BandBuzz
-- `src/BandBuzzLite/Band/XiaomiSession.cs` — shared link session
-  (auth, chunking, ack matching)
-- `src/BandBuzzLite/Band/WinRt*.cs` — raw WinRT transport (default)
-- `src/BandBuzzLite/Band/Win32*.cs` — raw Win32 GATT transport (`--win32`)
-- `src/BandBuzzLite/Config.cs`, `SelfTest.cs`, `Program.cs`, `appsettings.json`
-- `NativeMethods.txt` — the CsWin32 shopping list (only these get generated)
+* `src/BandBuzzLite/Band/Xiaomi*.cs` — protocol
+* `src/BandBuzzLite/Band/XiaomiSession.cs` — auth, chunking, ack matching
+* `src/BandBuzzLite/Band/WinRt*.cs` — raw WinRT transport (default)
+* `src/BandBuzzLite/Band/Win32*.cs` — raw Win32 GATT transport (`--win32`)
+* `src/BandBuzzLite/Config.cs`, `SelfTest.cs`, `Program.cs`, `appsettings.json`
+* `NativeMethods.txt` — CsWin32 API list
+* `install.ps1` — one-command identity package setup
 
 ## Licence
 
