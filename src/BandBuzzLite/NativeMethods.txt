@@ -1,0 +1,31 @@
+// CsWin32 source-generated Win32 P/Invoke. One file, sorted. The generator
+// emits only what is listed here - zero runtime DLLs from this package.
+BLUETOOTH_GATT_FLAG_NONE
+BLUETOOTH_GATT_FLAG_WRITE_WITHOUT_RESPONSE
+BLUETOOTH_GATT_VALUE_CHANGED_EVENT
+BLUETOOTH_GATT_VALUE_CHANGED_EVENT_REGISTRATION
+BluetoothFindDeviceClose
+BluetoothFindFirstDevice
+BluetoothFindFirstRadio
+BluetoothFindNextDevice
+BluetoothFindRadioClose
+BluetoothGATTGetCharacteristics
+BluetoothGATTGetDescriptors
+BluetoothGATTGetServices
+BluetoothGATTRegisterEvent
+BluetoothGATTSetCharacteristicValue
+BluetoothGATTSetDescriptorValue
+BluetoothGATTUnregisterEvent
+BTH_LE_GATT_EVENT_TYPE
+CloseHandle
+CreateFile
+FILE_CREATION_DISPOSITION
+FILE_SHARE_MODE
+GENERIC_ACCESS_RIGHTS
+GetCurrentPackageFullName
+SETUP_DI_GET_CLASS_DEVS_FLAGS
+SetupDiDestroyDeviceInfoList
+SetupDiEnumDeviceInterfaces
+SetupDiGetClassDevs
+SetupDiGetDeviceInterfaceDetail
+SetupDiGetDeviceProperty
