@@ -58,8 +58,4 @@ internal static class HuamiProtocol
     // MiBand7Coordinator specifics
     public static readonly string MiBand7Name = "Xiaomi Smart Band 7"; // HuamiConst.XIAOMI_SMART_BAND7_NAME
     public static readonly int[] MiBand7Sources = [260, 262, 263, 264, 265];
-
-    public static bool IsHuamiAuthKey(string key) => XiaomiProtocol.IsValidAuthKey(key);
-    public static byte[] ParseHuamiAuthKey(string key) => XiaomiProtocol.ParseAuthKey(key);
-    public static ulong ParseMac(string mac) => XiaomiProtocol.ParseMac(mac);
 }

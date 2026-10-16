@@ -26,7 +26,7 @@ internal sealed class Win32HuamiClient : ZeppOsSession
         if (pick is null)
         {
             _log("Huami band not in LE list, inquiry-scanning (~15s)...");
-            Win32Gatt.InquiryScanFor(HuamiProtocol.ParseMac(_mac), TimeSpan.FromSeconds(15), _log);
+            Win32Gatt.InquiryScanFor(XiaomiProtocol.ParseMac(_mac), TimeSpan.FromSeconds(15), _log);
             cands = Win32Gatt.EnumBleInterfaces(); pick = PickExact(cands, target);
         }
         Exception? last = null;

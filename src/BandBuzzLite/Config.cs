@@ -21,6 +21,7 @@ internal sealed class Config
     public int MaxWrite { get; set; } = 244;
     // xiaomi (FE95: Band 7 Pro, 8 Active/8/9...) or huami (Zepp OS: Band 7 plain, Amazfit family)
     public string DeviceFamily { get; set; } = "xiaomi";
+    public string NormalizedFamily => DeviceFamily.Trim().ToLowerInvariant();
 
     public static Config Load(string? path = null)
     {

@@ -45,8 +45,6 @@ internal static class HuamiCrypto
         return (seq, key);
     }
 
-    public static byte[] AesEcb(byte[] plain16aligned, byte[] key16) => HuamiFrame.AesEcbEncrypt(plain16aligned, key16);
-
     /// <summary>
     /// Build 33B auth reply: 05 + AES(secretKey, remoteRandom)[16] + AES(finalSession, remoteRandom)[16]
     /// Gadgetbridge InitOperation2021.java:166-176
@@ -55,8 +53,8 @@ internal static class HuamiCrypto
     {
         var out_ = new byte[33];
         out_[0] = 0x05;
-        Buffer.BlockCopy(AesEcb(remoteRandom16, secretKey16), 0, out_, 1, 16);
-        Buffer.BlockCopy(AesEcb(remoteRandom16, sessionKey16), 0, out_, 17, 16);
+        Buffer.BlockCopy(HuamiFrame.AesEcbEncrypt(remoteRandom16, secretKey16), 0, out_, 1, 16);
+        Buffer.BlockCopy(HuamiFrame.AesEcbEncrypt(remoteRandom16, sessionKey16), 0, out_, 17, 16);
         return out_;
     }
 }

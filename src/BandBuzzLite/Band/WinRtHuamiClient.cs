@@ -5,10 +5,6 @@ namespace BandBuzzLite.Band;
 
 internal sealed class WinRtHuamiClient : ZeppOsSession
 {
-    private EventRegistrationToken _rxToken;
-    private RecvHandler? _rxHandler;
-    private nint _rxCcw;
-
     private nint _deviceObj;
     private nint _charWrite2021; // 0x0016
     private nint _charWrite2021V3;
@@ -24,10 +20,10 @@ internal sealed class WinRtHuamiClient : ZeppOsSession
         DisposeTransport();
         IsReady = false;
         _sessionKey = null;
-        _encoder.Mtu = Mtu; _decoder.SetEncryptionParameters(Array.Empty<byte>());
+        _encoder.Mtu = Mtu;
 
-        var addr = HuamiProtocol.ParseMac(_mac);
-        await WaitForAdvertisementAsync(addr, TimeSpan.FromSeconds(20), ct);
+        var addr = XiaomiProtocol.ParseMac(_mac);
+        await BleDiscovery.WaitForAdvertisementAsync(addr, _mac, TimeSpan.FromSeconds(20), ct, _log);
 
         _log($"Connecting (Huami FEE1) to {_mac} ... (band takes 1 connection - close phone app first)");
         var statics = WinRt.Wrap<IDeviceStatics>(WinRt.GetFactory("Windows.Devices.Bluetooth.BluetoothLEDevice", new Guid(WinRtIids.DeviceStatics)));
@@ -36,51 +32,8 @@ internal sealed class WinRtHuamiClient : ZeppOsSession
         _deviceObj = WinRt.Wrap<IOpDevice>(op).GetResults();
         if (_deviceObj == 0) throw new InvalidOperationException($"BLE device not found: {_mac}");
 
-        var dev3 = WinRt.QueryWrap<IDevice3>(_deviceObj, WinRtIids.Device3);
-        var svcOp = dev3.GetGattServicesAsync();
-        await WinRt.WaitOpAsync(svcOp, WinRtIids.OpServices, "GetGattServicesAsync", TimeSpan.FromSeconds(15), ct);
-        var svcRes = WinRt.Wrap<IServicesResult>(WinRt.Wrap<IOpServices>(svcOp).GetResults());
-        if ((GattStatus)svcRes.GetStatus() != GattStatus.Success) throw new InvalidOperationException($"GATT discovery failed: {(GattStatus)svcRes.GetStatus()}");
-
-        var svcVec = WinRt.QueryWrap<IVecServices>(svcRes.GetServices(), WinRtIids.VecServices);
-        var seenSvcs = new List<Guid>();
-        for (uint i = 0; i < svcVec.GetSize(); i++)
-        {
-            svcVec.GetAt(i, out var svcPtr);
-            seenSvcs.Add(WinRt.QueryWrap<IService1>(svcPtr, WinRtIids.Service1).GetUuid());
-        }
-        _log($"GATT services found: {string.Join(", ", seenSvcs)}");
-        var hasFee1 = seenSvcs.Contains(HuamiProtocol.ServiceFee1);
-        var has3512 = seenSvcs.Contains(HuamiProtocol.ServiceFtg);
-        if (!hasFee1 && !has3512)
-            throw new InvalidOperationException($"Huami service FEE1/3512 not found (seen {string.Join(", ", seenSvcs)}). Not a Zepp OS device – try --family xiaomi for FE95 bands (7 Pro/8 Active). Band MAC {_mac} services: {string.Join(", ", seenSvcs)}");
-
-        // Brute-force all services for 0x0016/0x0017 – they live under 00001530 on Zepp OS but search all to tolerate variants
-        var allSeenChars = new List<Guid>();
-        for (uint si = 0; si < svcVec.GetSize(); si++)
-        {
-            svcVec.GetAt(si, out var svcPtr);
-            var svc3x = WinRt.QueryWrap<IService3>(svcPtr, WinRtIids.Service3);
-            var chOpx = svc3x.GetCharacteristicsAsync();
-            await WinRt.WaitOpAsync(chOpx, WinRtIids.OpCharacteristics, "GetCharacteristicsAsync", TimeSpan.FromSeconds(10), ct);
-            var chResx = WinRt.Wrap<ICharacteristicsResult>(WinRt.Wrap<IOpCharacteristics>(chOpx).GetResults());
-            if ((GattStatus)chResx.GetStatus() != GattStatus.Success) continue;
-            var chVecx = WinRt.QueryWrap<IVecCharacteristics>(chResx.GetCharacteristics(), WinRtIids.VecCharacteristics);
-            for (uint ci = 0; ci < chVecx.GetSize(); ci++)
-            {
-                chVecx.GetAt(ci, out var chPtr);
-                var uuid = WinRt.QueryWrap<ICharacteristic1>(chPtr, WinRtIids.Characteristic1).GetUuid();
-                allSeenChars.Add(uuid);
-                if (uuid == HuamiProtocol.CharChunkedWrite2021) { _charWrite2021 = chPtr; _charWrite2021V3 = WinRt.Query(chPtr, new Guid(WinRtIids.Characteristic3)); }
-                if (uuid == HuamiProtocol.CharChunkedRead2021) _charRead2021 = chPtr;
-            }
-            if (_charWrite2021 != 0 && _charRead2021 != 0) break;
-        }
-        _log($"GATT chars seen: {string.Join(", ", allSeenChars.Distinct())}");
-        if (_charWrite2021 == 0)
-            throw new InvalidOperationException($"Huami 0x0016 write char missing (seen chars: {string.Join(", ", allSeenChars.Distinct())}). If band is Xiaomi FE95 (7 Pro/8 Active) use --family xiaomi.");
-        if (_charRead2021 == 0)
-            throw new InvalidOperationException($"Huami 0x0017 notify char missing (seen chars: {string.Join(", ", allSeenChars.Distinct())}).");
+        var (w, w3, r) = await BleDiscovery.FindHuamiCharsAsync(_deviceObj, ct, _log);
+        _charWrite2021 = w; _charWrite2021V3 = w3; _charRead2021 = r;
 
         _vcHandler = new ValueHandler(OnValueChanged);
         _vcCcw = WinRt.ComInterfaceFor(_vcHandler, WinRtIids.ValueHandler);
@@ -99,21 +52,6 @@ internal sealed class WinRtHuamiClient : ZeppOsSession
         var st = WinRt.Wrap<IWriteResult>(WinRt.Wrap<IOpWrite>(cccdOp).GetResults()).GetStatus();
         if ((GattStatus)st != GattStatus.Success) throw new InvalidOperationException($"CCCD write failed: {(GattStatus)st}");
         token = WinRt.Wrap<ICharacteristic1>(charV1).AddValueChanged(_vcCcw);
-    }
-
-    private async Task WaitForAdvertisementAsync(ulong addr, TimeSpan timeout, CancellationToken ct)
-    {
-        _log("Scanning for Huami band (FEE1)...");
-        var watcherObj = WinRt.Activate("Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher");
-        var watcher = WinRt.QueryWrap<IAdvertWatcher>(watcherObj, WinRtIids.Watcher);
-        watcher.SetScanningMode(1);
-        var seen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _rxHandler = new RecvHandler(argsPtr => { try { var args = WinRt.Wrap<IReceivedArgs>(argsPtr); if (args.GetBluetoothAddress() == addr) seen.TrySetResult(true); } catch { } });
-        _rxCcw = WinRt.ComInterfaceFor(_rxHandler, WinRtIids.RecvHandler);
-        _rxToken = watcher.AddReceived(_rxCcw);
-        try { watcher.Start(); } catch (Exception ex) { throw new InvalidOperationException($"BLE scan failed: {ex.Message}", ex); }
-        try { if (!await AwaitOrThrowAsync(seen.Task, timeout, $"no BLE advertisement from {_mac}", ct)) throw new InvalidOperationException("BLE scan stopped"); }
-        finally { try { watcher.Stop(); } catch { } try { watcher.RemoveReceived(_rxToken); } catch { } if (_rxCcw != 0) { System.Runtime.InteropServices.Marshal.Release(_rxCcw); _rxCcw = 0; } _rxHandler = null; }
     }
 
     protected override Task TransportWriteAsync(byte[] chunk, CancellationToken ct)

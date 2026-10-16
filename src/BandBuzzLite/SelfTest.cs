@@ -145,9 +145,9 @@ internal static class SelfTest
             var huamiPayload = "hello huami"u8.ToArray();
             var huamiEnc2 = new HuamiFrame.Encoder { Mtu = 247 };
             huamiEnc2.SetEncryptionParameters(12345, huamiKey);
-            var huamiChunks = huamiEnc2.Encode(0x001e, huamiPayload, true, true);
+            var huamiChunks = huamiEnc2.Encode(0x001e, huamiPayload, true);
             Check(huamiChunks.Count >= 1 && huamiChunks[0][0] == 0x03, "huami-chunked-encode");
-            var huamiDec2 = new HuamiFrame.Decoder(true);
+            var huamiDec2 = new HuamiFrame.Decoder();
             huamiDec2.SetEncryptionParameters(huamiKey);
             byte[]? huamiReassembled = null;
             foreach (var c in huamiChunks) { var r = huamiDec2.Decode(c); if (r != null) huamiReassembled = r.Value.payload; }

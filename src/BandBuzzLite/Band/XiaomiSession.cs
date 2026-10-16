@@ -9,17 +9,12 @@ namespace BandBuzzLite.Band;
 /// Xiaomi BLE link for FE95 encrypted bands (Band 8 Active, Band 7 Pro, Band 8/9/...).
 /// Owns ONE connection. For plain Mi Band 7 (Huami/Zepp OS, FEE1/3512) see ZeppOsSession + HuamiProtocol.
 /// </summary>
-internal abstract class XiaomiSession : IBandSession
+internal abstract class XiaomiSession : BandSession
 {
-    protected readonly string _mac;
-    protected readonly byte[] _secret;
-    protected readonly Action<string> _log;
-
     protected XiaomiCrypto.SessionKeys? _keys;
     protected int _encIndex = 1;
 
     protected readonly XiaomiFrame.Reassembler _reassembler = new();
-    protected readonly SemaphoreSlim _writeLock = new(1, 1);
 
     // Signalled from the notify thread; consumed by the auth/send flow.
     protected TaskCompletionSource<int>? _ackTcs;
@@ -28,19 +23,12 @@ internal abstract class XiaomiSession : IBandSession
     protected TaskCompletionSource<(bool Encrypted, byte[] Payload)>? _cmdTcs;
     protected int[]? _pendingResend;
 
-    public bool IsReady { get; protected set; }
-
-    // 247-3 ATT overhead, same as the tested pc_test value.
-    public int MaxWrite { get; set; } = 244;
-
     protected XiaomiSession(string mac, string authKeyHex, Action<string>? log = null)
+        : base(mac, authKeyHex, 244, 247, log)
     {
-        _mac = mac;
-        _secret = XiaomiProtocol.ParseAuthKey(authKeyHex);
-        _log = log ?? Console.WriteLine;
     }
 
-    public abstract Task ConnectAsync(CancellationToken ct = default);
+    public override abstract Task ConnectAsync(CancellationToken ct = default);
 
     /// <summary>One ATT write; throws InvalidOperationException("ATT write failed...") on transport failure.</summary>
     protected abstract Task TransportWriteAsync(byte[] packet, CancellationToken ct);
@@ -50,20 +38,20 @@ internal abstract class XiaomiSession : IBandSession
 
     protected abstract void DisposeTransport();
 
-    public void Disconnect()
+    public override void Disconnect()
     {
         DisposeTransport();
         IsReady = false;
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         DisposeTransport();
         _writeLock.Dispose();
         GC.SuppressFinalize(this);
     }
 
-    public async Task SendNotifAsync(string title, string body, string package, string appName, int nid,
+    public override async Task SendNotifAsync(string title, string body, string package, string appName, int nid,
         CancellationToken ct = default)
     {
         if (!IsReady || _keys is null)
@@ -200,20 +188,6 @@ internal abstract class XiaomiSession : IBandSession
         finally
         {
             _writeLock.Release();
-        }
-    }
-
-    protected static async Task<T> AwaitOrThrowAsync<T>(Task<T> t, TimeSpan timeout, string msg, CancellationToken ct)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(timeout);
-        try
-        {
-            return await t.WaitAsync(cts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new TimeoutException(msg);
         }
     }
 

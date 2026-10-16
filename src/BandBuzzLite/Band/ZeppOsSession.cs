@@ -7,42 +7,29 @@ namespace BandBuzzLite.Band;
 /// InitOperation2021.java:92-176 (ECDH B-163 + AES ECB).
 /// Transport-agnostic: concrete WinRt/Win32 subclasses provide ATT write + notify dispatch.
 /// </summary>
-internal abstract class ZeppOsSession : IBandSession
+internal abstract class ZeppOsSession : BandSession
 {
-    protected readonly string _mac;
-    protected readonly byte[] _secret; // 16B authKey
-    protected readonly Action<string> _log;
-
     protected byte[]? _sessionKey; // finalSharedSession 16B after ECDH
-    protected int _seq;
     protected readonly HuamiFrame.Encoder _encoder = new() { Mtu = 247 };
-    protected readonly HuamiFrame.Decoder _decoder = new(extended: true);
-    protected readonly SemaphoreSlim _writeLock = new(1, 1);
+    protected readonly HuamiFrame.Decoder _decoder = new();
 
     protected TaskCompletionSource<int>? _authTcs; // 0 success
     protected TaskCompletionSource<(int version, bool pics, bool key)>? _capsTcs;
-    protected TaskCompletionSource<bool>? _notifAckTcs;
-
-    public bool IsReady { get; protected set; }
-    public int MaxWrite { get; set; } = 247;
-    public int Mtu { get; set; } = 247;
 
     protected ZeppOsSession(string mac, string authKeyHex, Action<string>? log = null)
+        : base(mac, authKeyHex, 247, 247, log)
     {
-        _mac = mac;
-        _secret = XiaomiProtocol.ParseAuthKey(authKeyHex);
-        _log = log ?? Console.WriteLine;
     }
 
-    public abstract Task ConnectAsync(CancellationToken ct = default);
+    public override abstract Task ConnectAsync(CancellationToken ct = default);
     protected abstract Task TransportWriteAsync(byte[] chunk, CancellationToken ct);
     protected abstract void SendChunkedAck(byte handle, byte count);
     protected abstract void DisposeTransport();
 
-    public void Disconnect() { DisposeTransport(); IsReady = false; _sessionKey = null; }
-    public void Dispose() { DisposeTransport(); _writeLock.Dispose(); GC.SuppressFinalize(this); }
+    public override void Disconnect() { DisposeTransport(); IsReady = false; _sessionKey = null; }
+    public override void Dispose() { DisposeTransport(); _writeLock.Dispose(); GC.SuppressFinalize(this); }
 
-    public async Task SendNotifAsync(string title, string body, string package, string appName, int nid, CancellationToken ct = default)
+    public override async Task SendNotifAsync(string title, string body, string package, string appName, int nid, CancellationToken ct = default)
     {
         if (!IsReady || _sessionKey is null) throw new InvalidOperationException("link not READY");
         var plain = ZeppOsProto.BuildNotification(title, body, package, appName, nid);
@@ -82,7 +69,7 @@ internal abstract class ZeppOsSession : IBandSession
         await _writeLock.WaitAsync(ct);
         try
         {
-            var chunks = _encoder.Encode(endpoint, plain, encrypt, extended: true);
+            var chunks = _encoder.Encode(endpoint, plain, encrypt);
             foreach (var c in chunks) await TransportWriteAsync(c, ct);
             // For encrypted notifs, band ack is via chunked ack (0x04 00 handle 01 count) – we fire-and-forget for now
             // ZeppOsNotificationService does not wait for an explicit ACK beyond chunked layer for SEND.
@@ -90,14 +77,6 @@ internal abstract class ZeppOsSession : IBandSession
             _log($"{task}: {chunks.Count} chunk(s) sent");
         }
         finally { _writeLock.Release(); }
-    }
-
-    protected static async Task<T> AwaitOrThrowAsync<T>(Task<T> t, TimeSpan timeout, string msg, CancellationToken ct)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(timeout);
-        try { return await t.WaitAsync(cts.Token); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException(msg); }
     }
 
     // Called from transport notify thread (00000017)
@@ -124,7 +103,6 @@ internal abstract class ZeppOsSession : IBandSession
 
     private void HandleAuthPayload(byte[] p)
     {
-        // Expected forms: 10 04 01 <16B random><48B pub>  or 10 05 01 / 10 05 25
         if (p.Length >= 3 && p[0] == 0x10 && p[1] == 0x04 && p[2] == 0x01 && p.Length >= 3 + 16 + 48)
         {
             var remoteRandom = p[3..19];
@@ -133,7 +111,7 @@ internal abstract class ZeppOsSession : IBandSession
             var shared = EcdhB163.GenerateShared(_lastPrivateEC, remotePub);
             if (shared is null) { _authTcs?.TrySetResult(-1); return; }
             var (seq, sess) = HuamiCrypto.DeriveSession(shared, _secret);
-            _seq = seq; _sessionKey = sess;
+            _sessionKey = sess;
             _encoder.SetEncryptionParameters(seq, sess);
             _decoder.SetEncryptionParameters(sess);
             // Build step2 reply 05 + AES(...) + AES(...)

@@ -7,10 +7,6 @@ namespace BandBuzzLite.Band;
 
 internal sealed class WinRtBandClient : XiaomiSession
 {
-    private EventRegistrationToken _rxToken;
-    private RecvHandler? _rxHandler;
-    private nint _rxCcw;
-
     private nint _deviceObj;
     private nint _charReadV1;
     private nint _charWriteV1;
@@ -34,7 +30,7 @@ internal sealed class WinRtBandClient : XiaomiSession
         _encIndex = 1;
 
         var addr = XiaomiProtocol.ParseMac(_mac);
-        await WaitForAdvertisementAsync(addr, TimeSpan.FromSeconds(20), ct);
+        await BleDiscovery.WaitForAdvertisementAsync(addr, _mac, TimeSpan.FromSeconds(20), ct, _log);
 
         _log($"Connecting to {_mac} ... (band takes 1 connection - close phone app first)");
         var statics = WinRt.Wrap<IDeviceStatics>(WinRt.GetFactory(
@@ -45,56 +41,8 @@ internal sealed class WinRtBandClient : XiaomiSession
         if (_deviceObj == 0)
             throw new InvalidOperationException($"BLE device not found: {_mac}");
 
-        var dev3 = WinRt.QueryWrap<IDevice3>(_deviceObj, WinRtIids.Device3);
-        var svcOp = dev3.GetGattServicesAsync();
-        await WinRt.WaitOpAsync(svcOp, WinRtIids.OpServices, "GetGattServicesAsync", TimeSpan.FromSeconds(15), ct);
-        var svcRes = WinRt.Wrap<IServicesResult>(WinRt.Wrap<IOpServices>(svcOp).GetResults());
-        if ((GattStatus)svcRes.GetStatus() != GattStatus.Success)
-            throw new InvalidOperationException($"GATT service discovery failed: {(GattStatus)svcRes.GetStatus()}");
-
-        var svcVec = WinRt.QueryWrap<IVecServices>(svcRes.GetServices(), WinRtIids.VecServices);
-        nint? fe95 = null;
-        var nSvc = svcVec.GetSize();
-        for (var i = 0u; i < nSvc; i++)
-        {
-            svcVec.GetAt(i, out var svcPtr);
-            if (WinRt.QueryWrap<IService1>(svcPtr, WinRtIids.Service1).GetUuid() == XiaomiProtocol.ServiceFe95)
-            {
-                fe95 = svcPtr;
-                break;
-            }
-        }
-        if (fe95 is null)
-            throw new InvalidOperationException(
-                "FE95 service not found – device is not an encrypted Xiaomi FE95 band. " +
-                "Plain Xiaomi Smart Band 7 (no Pro, Zepp OS/Huami) does not expose FE95 and is unsupported. " +
-                "Supported: Band 7 Pro, 8 Active, 8/8 Pro, 9/9 Pro, Redmi Smart Band 2/Pro etc. (Gadgetbridge Xiaomi family).");
-
-        var svc3 = WinRt.QueryWrap<IService3>(fe95.Value, WinRtIids.Service3);
-        var chOp = svc3.GetCharacteristicsAsync();
-        await WinRt.WaitOpAsync(chOp, WinRtIids.OpCharacteristics, "GetCharacteristicsAsync", TimeSpan.FromSeconds(15), ct);
-        var chRes = WinRt.Wrap<ICharacteristicsResult>(WinRt.Wrap<IOpCharacteristics>(chOp).GetResults());
-        if ((GattStatus)chRes.GetStatus() != GattStatus.Success)
-            throw new InvalidOperationException($"Characteristic discovery failed: {(GattStatus)chRes.GetStatus()}");
-
-        var chVec = WinRt.QueryWrap<IVecCharacteristics>(chRes.GetCharacteristics(), WinRtIids.VecCharacteristics);
-        var nCh = chVec.GetSize();
-        for (var i = 0u; i < nCh; i++)
-        {
-            chVec.GetAt(i, out var chPtr);
-            var uuid = WinRt.QueryWrap<ICharacteristic1>(chPtr, WinRtIids.Characteristic1).GetUuid();
-            if (uuid == XiaomiProtocol.CharCommandRead)
-                _charReadV1 = chPtr;
-            else if (uuid == XiaomiProtocol.CharCommandWrite)
-            {
-                _charWriteV1 = chPtr;
-                _charWriteV3 = WinRt.Query(chPtr, new Guid(WinRtIids.Characteristic3));
-            }
-        }
-        if (_charReadV1 == 0)
-            throw new InvalidOperationException("0x51 characteristic missing");
-        if (_charWriteV1 == 0)
-            throw new InvalidOperationException("0x52 characteristic missing");
+        var (w, w3, r) = await BleDiscovery.FindXiaomiCharsAsync(_deviceObj, ct, _log);
+        _charWriteV1 = w; _charWriteV3 = w3; _charReadV1 = r;
 
         // Subscribe BEFORE any write, on both chars like the Android app + pc_test.
         _vcHandler = new ValueHandler(OnValueChanged);
@@ -122,51 +70,6 @@ internal sealed class WinRtBandClient : XiaomiSession
             throw new InvalidOperationException($"CCCD write failed: {(GattStatus)st}");
         var ch1 = WinRt.Wrap<ICharacteristic1>(charV1);
         token = ch1.AddValueChanged(_vcCcw);
-    }
-
-    private async Task WaitForAdvertisementAsync(ulong addr, TimeSpan timeout, CancellationToken ct)
-    {
-        _log("Scanning for the band...");
-        var watcherObj = WinRt.Activate("Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher");
-        var watcher = WinRt.QueryWrap<IAdvertWatcher>(watcherObj, WinRtIids.Watcher);
-        watcher.SetScanningMode(1); // Active
-        var seen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _rxHandler = new RecvHandler(argsPtr =>
-        {
-            try
-            {
-                var args = WinRt.Wrap<IReceivedArgs>(argsPtr);
-                if (args.GetBluetoothAddress() == addr)
-                    seen.TrySetResult(true);
-            }
-            catch { /* never let native see managed exceptions */ }
-        });
-        _rxCcw = WinRt.ComInterfaceFor(_rxHandler, WinRtIids.RecvHandler);
-        _rxToken = watcher.AddReceived(_rxCcw);
-        try
-        {
-            watcher.Start();
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"BLE scan failed (radio off?): {ex.Message}", ex);
-        }
-        try
-        {
-            if (!await AwaitOrThrowAsync(seen.Task, timeout, $"no BLE advertisement from {_mac} (band nearby and advertising?)", ct))
-                throw new InvalidOperationException("BLE scan stopped unexpectedly (radio off?)");
-        }
-        finally
-        {
-            try { watcher.Stop(); } catch { }
-            try { watcher.RemoveReceived(_rxToken); } catch { }
-            if (_rxCcw != 0)
-            {
-                System.Runtime.InteropServices.Marshal.Release(_rxCcw);
-                _rxCcw = 0;
-            }
-            _rxHandler = null;
-        }
     }
 
     protected override async Task TransportWriteAsync(byte[] packet, CancellationToken ct)

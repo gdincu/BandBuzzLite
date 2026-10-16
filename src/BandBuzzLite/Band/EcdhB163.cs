@@ -1,6 +1,7 @@
 // Port of Gadgetbridge util/ECDH_B163.java (tiny-ECDH B-163, NIST B-163)
 // Original: https://github.com/kokke/tiny-ECDH-c/, ported to Java by Gadgetbridge.
-// This is a line-for-line C# port – ugly but keeps parity with the C code.
+// Line-for-line C# port; uses int[] with unchecked casts to preserve Java/C parity.
+// uint[] would avoid unchecked (e.g. 0xb8c953ca) but is left as int[] for fidelity.
 
 namespace BandBuzzLite.Band;
 

@@ -69,7 +69,7 @@ internal static class Program
                     cfg.Filters = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
                     break;
                 case "--family" when i + 1 < args.Length:
-                    cfg.DeviceFamily = args[++i].ToLowerInvariant();
+                    cfg.DeviceFamily = args[++i];
                     break;
                 case "--huami":
                     cfg.DeviceFamily = "huami";
@@ -89,7 +89,7 @@ internal static class Program
         var hasIdentity = ToastWatcher.HasPackageIdentity();
         Console.WriteLine($"Package identity: {(hasIdentity ? "(present - toast access available)" : "(none - unpackaged run)")}");
         Console.WriteLine($"Toast access: {await ToastWatcher.ProbeAccessAsync()}");
-        Console.WriteLine($"Family: {cfg.DeviceFamily} (xiaomi=FE95 0000fe95/0x51/0x52, huami=Zepp OS FEE1/3512 endpoint 0x001e)");
+        Console.WriteLine($"Family: {cfg.NormalizedFamily} (xiaomi=FE95 0000fe95/0x51/0x52, huami=Zepp OS FEE1/3512 endpoint 0x001e)");
         Console.WriteLine($"  Xiaomi: {string.Join(", ", XiaomiProtocol.SupportedDeviceExamples.Take(2))}...");
         Console.WriteLine($"  Huami : {string.Join(", ", HuamiProtocol.SupportedHuamiExamples.Take(2))}...");
         Console.WriteLine("Transport default: raw WinRT (no WinRT projection DLL)");
@@ -170,7 +170,7 @@ internal static class Program
 
     private static IBandSession MakeBand(Config cfg, string[] args)
     {
-        var family = cfg.DeviceFamily.ToLowerInvariant();
+        var family = cfg.NormalizedFamily;
         var win32 = args.Contains("--win32");
         if (family == "huami" || family == "zeppos")
             return win32

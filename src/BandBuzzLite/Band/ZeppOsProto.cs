@@ -10,14 +10,13 @@ namespace BandBuzzLite.Band;
 /// </summary>
 internal static class ZeppOsProto
 {
-    public static byte[] BuildNotification(string title, string body, string package, string appName, int id, string? key = null, bool hasReply = false)
+    public static byte[] BuildNotification(string title, string body, string package, string appName, int id, bool hasReply = false)
     {
-        // Truncate like XiaomiProto (512) but ZeppOsNotificationService maxLength 512
         var t = TruncateUtf8(title, 120);
         var b = TruncateUtf8(body, 512);
         using var ms = new MemoryStream();
         ms.WriteByte(HuamiProtocol.NotifCmdSend);
-        ms.Write(BitConverter.GetBytes(id), 0, 4); // LE32
+        ms.Write(BitConverter.GetBytes(id), 0, 4);
         ms.WriteByte(HuamiProtocol.NotifTypeNormal);
         ms.WriteByte(HuamiProtocol.NotifSubcmdShow);
         WriteString(ms, package);
@@ -25,45 +24,10 @@ internal static class ZeppOsProto
         WriteString(ms, b);
         WriteString(ms, appName);
         ms.WriteByte((byte)(hasReply ? 1 : 0));
-        // v5: ZeppOsNotificationService adds silent 0x00 if version>=5, picture 0x00, key. We send minimal v4-compatible.
-        // If caller wants key support, append key.
-        if (key is not null)
-        {
-            // For compat, write silent 0 + picture 0 + key when key requested
-            // This matches ZeppOsNotificationService version>=5 path with supportsPictures/supportsNotificationKey
-            // We'll emit the minimal extension: silent + picture + key
-            // But to keep first impl simple, if key null we omit extensions (v4 device ignores extra).
-        }
         return ms.ToArray();
     }
 
     public static byte[] BuildCapabilitiesRequest() => [HuamiProtocol.NotifCmdCapabilitiesRequest];
-
-    public static byte[] BuildDelete(int id)
-    {
-        using var ms = new MemoryStream();
-        ms.WriteByte(HuamiProtocol.NotifCmdSend);
-        ms.Write(BitConverter.GetBytes(id), 0, 4);
-        ms.WriteByte(HuamiProtocol.NotifTypeNormal);
-        ms.WriteByte(HuamiProtocol.NotifSubcmdDismissFromPhone);
-        ms.Write([0, 0, 0, 0, 0], 0, 5);
-        return ms.ToArray();
-    }
-
-    public static byte[] BuildCall(string name, string number, bool incoming)
-    {
-        using var ms = new MemoryStream();
-        ms.WriteByte(HuamiProtocol.NotifCmdSend);
-        ms.Write(BitConverter.GetBytes(0), 0, 4);
-        ms.WriteByte(HuamiProtocol.NotifTypeCall);
-        ms.WriteByte((byte)(incoming ? 0x00 : 0x02));
-        ms.WriteByte(0);
-        WriteString(ms, name);
-        ms.WriteByte(0); ms.WriteByte(0); // two unknowns
-        WriteString(ms, number);
-        ms.WriteByte(1); // replyFlag
-        return ms.ToArray();
-    }
 
     private static void WriteString(MemoryStream ms, string s)
     {
