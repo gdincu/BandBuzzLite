@@ -65,7 +65,10 @@ internal sealed class WinRtBandClient : XiaomiSession
             }
         }
         if (fe95 is null)
-            throw new InvalidOperationException("FE95 service not found");
+            throw new InvalidOperationException(
+                "FE95 service not found – device is not an encrypted Xiaomi FE95 band. " +
+                "Plain Xiaomi Smart Band 7 (no Pro, Zepp OS/Huami) does not expose FE95 and is unsupported. " +
+                "Supported: Band 7 Pro, 8 Active, 8/8 Pro, 9/9 Pro, Redmi Smart Band 2/Pro etc. (Gadgetbridge Xiaomi family).");
 
         var svc3 = WinRt.QueryWrap<IService3>(fe95.Value, WinRtIids.Service3);
         var chOp = svc3.GetCharacteristicsAsync();

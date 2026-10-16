@@ -97,7 +97,9 @@ internal sealed class Win32BandClient : XiaomiSession
         var svcs = Win32Gatt.GetServices(_handle);
         var svc = svcs.FirstOrDefault(s => Win32Gatt.UuidMatches(s.ServiceUuid, XiaomiProtocol.ServiceFe95));
         if (svc.AttributeHandle == 0)
-            throw new InvalidOperationException("FE95 service not found");
+            throw new InvalidOperationException(
+                "FE95 service not found – not an encrypted Xiaomi FE95 band. " +
+                "Plain Band 7 (Zepp OS) is unsupported; use Band 7 Pro / 8 Active / 8/9 ...");
 
         var chars = Win32Gatt.GetCharacteristics(_handle, svc);
         _read = chars.FirstOrDefault(c => Win32Gatt.UuidMatches(c.CharacteristicUuid, XiaomiProtocol.CharCommandRead));

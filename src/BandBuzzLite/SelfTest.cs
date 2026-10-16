@@ -111,6 +111,15 @@ internal static class SelfTest
             == "14cce878b31ffea758056768c44ab3dfe8ce5200e9463b42e6d230515a28412977cace427bd09404c415f41fcf29b1ea03697a7557077b60bb3b6fa0af2dbda0",
             "vector-hkdf");
 
+        // 10. FE95 family: same service/char UUIDs for all Xiaomi encrypted bands
+        // (Gadgetbridge XiaomiUuids.BLE_UUIDS["0000fe95-…"] – Band 7 Pro, Band 8 Active, etc).
+        Check(XiaomiProtocol.ServiceFe95 == Guid.Parse("0000fe95-0000-1000-8000-00805f9b34fb"), "fe95-uuid");
+        Check(XiaomiProtocol.CharCommandRead == Guid.Parse("00000051-0000-1000-8000-00805f9b34fb"), "char-51-uuid");
+        Check(XiaomiProtocol.CharCommandWrite == Guid.Parse("00000052-0000-1000-8000-00805f9b34fb"), "char-52-uuid");
+        Check(XiaomiProtocol.SupportedDeviceExamples.Length >= 6, "supported-list");
+        Check(XiaomiProtocol.SupportedDeviceExamples.Any(s => s.Contains("7 Pro")), "supported-7pro");
+        Check(XiaomiProtocol.UnsupportedHuamiBand7Note.Contains("Zepp OS"), "unsupported-note");
+
         Console.WriteLine(failures == 0 ? "SELFTEST OK" : $"SELFTEST {failures} FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }

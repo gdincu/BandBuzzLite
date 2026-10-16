@@ -1,4 +1,6 @@
-// BandBuzzLite: sub-800KB notifier for Xiaomi Smart Band 8 Active.
+// BandBuzzLite: sub-800KB notifier for Xiaomi FE95 bands
+// (Smart Band 8 Active, 7 Pro, 8/9/... – all Gadgetbridge Xiaomi family).
+// Plain "Band 7" (Huami/Zepp OS, no Pro) is NOT compatible – different stack.
 // Sends one-shot cards unpackaged; watch/--list need the identity package
 // (install.ps1) for toast access. No Microsoft.Windows.SDK.NET.dll anywhere:
 // WinRT comes from hand-rolled raw interop (Band/WinRt*.cs).
@@ -273,7 +275,12 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine("""
-            BandBuzzLite - sub-800KB notifier for Xiaomi Smart Band 8 Active.
+            BandBuzzLite - sub-800KB notifier for Xiaomi FE95 bands.
+            Supported: Xiaomi Smart Band 8 Active (primary), 7 Pro, 8, 8 Pro, 9/9 Pro,
+                       Redmi Smart Band 2/Pro, Redmi Watch 3/4/5 ... any FE95 Xiaomi band.
+                       Plain "Band 7" (no Pro, Zepp OS/Huami) is NOT compatible – different BLE stack.
+            Gadgetbridge refs: devices/xiaomi/*Coordinator.java + service/devices/xiaomi/XiaomiUuids.java (FE95),
+                               huami/miband7/MiBand7Coordinator.java (Zepp OS, unsupported here).
             Usage:
               BandBuzzLite                        watch + forward (needs the installed app - install.ps1)
               BandBuzzLite --list                 dump current toasts (tune --filter)
