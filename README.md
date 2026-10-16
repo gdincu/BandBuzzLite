@@ -1,10 +1,12 @@
 # BandBuzzLite
 
-A tiny Windows notifier for your Xiaomi / Amazfit band. It forwards Windows toast notifications (Chrome, Teams, Outlook…) to your band as cards — no phone needed.
+A **zero-dependency, ultra-compact rebuild of the BandBuzz utility for beaming Windows notifications to Xiaomi & Amazfit bands** — toasts → band cards, no phone needed.
 
-* **~620 KB** published (`BandBuzzLite.exe` + `BandBuzzLite.dll`, pdb not required, sub-800 KB). Needs .NET 9.
-* **No pairing in Windows** — connects directly from Bluetooth LE advertisements.
-* Same card protocol as [BandBuzz](../BandBuzz), now with two stacks: Xiaomi FE95 and Huami/Zepp OS.
+Forwards Chrome/Teams/Outlook… to **Mi Band 7 / 7 Pro / 8 family + Amazfit family** over BLE — **no Windows pairing** (connects directly from advertisements).
+
+* **~620 KB** published (`BandBuzzLite.exe` + `BandBuzzLite.dll`, pdb not required, sub-800 KB). Needs .NET 9 runtime, no heavy projection DLL.
+* Dual-stack: **Xiaomi FE95** (Smart Band 7 Pro, 8 Active, 8/8 Pro/9/9 Pro, Redmi bands/watches) + **Huami/Zepp OS** (Mi Band 7 plain, Amazfit Band 7/Bip 5/GTR/GTS/T-Rex/Falcon/Cheetah/Balance/Active…).
+* Same card protocol as [BandBuzz](../BandBuzz).
 
 ## Supported bands
 
