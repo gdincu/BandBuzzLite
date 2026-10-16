@@ -44,14 +44,26 @@ internal sealed class Win32HuamiClient : ZeppOsSession
         _log($"Connecting (Huami) to {_mac} ...");
         _handle = Win32Gatt.OpenDevice(devicePath);
         var svcs = Win32Gatt.GetServices(_handle);
-        var svc = svcs.FirstOrDefault(s => Win32Gatt.UuidMatches(s.ServiceUuid, HuamiProtocol.ServiceFtg));
-        if (svc.AttributeHandle == 0) svc = svcs.FirstOrDefault(s => Win32Gatt.UuidMatches(s.ServiceUuid, HuamiProtocol.ServiceFee1));
-        if (svc.AttributeHandle == 0) throw new InvalidOperationException("Huami service FEE1/3512 not found");
-        var chars = Win32Gatt.GetCharacteristics(_handle, svc);
-        _write16 = chars.FirstOrDefault(c => Win32Gatt.UuidMatches(c.CharacteristicUuid, HuamiProtocol.CharChunkedWrite2021));
-        _read17 = chars.FirstOrDefault(c => Win32Gatt.UuidMatches(c.CharacteristicUuid, HuamiProtocol.CharChunkedRead2021));
-        if (_write16 is null) throw new InvalidOperationException("Huami 0x0016 write char missing");
-        if (_read17 is null) throw new InvalidOperationException("Huami 0x0017 notify char missing");
+        _log($"Services: {string.Join(", ", svcs.Select(s => s.ServiceUuid.ToString()))}");
+        var hasFee1 = svcs.Any(s => Win32Gatt.UuidMatches(s.ServiceUuid, HuamiProtocol.ServiceFee1));
+        var has3512 = svcs.Any(s => Win32Gatt.UuidMatches(s.ServiceUuid, HuamiProtocol.ServiceFtg));
+        if (!hasFee1 && !has3512) throw new InvalidOperationException($"Huami service FEE1/3512 not found (services: {string.Join(", ", svcs.Select(s => s.ServiceUuid))}). Try --family xiaomi for FE95.");
+        // Search all services for 0x0016/0x0017 – not just one (they live under 00001530)
+        var allChars = new List<BTH_LE_GATT_CHARACTERISTIC>();
+        foreach (var s in svcs)
+        {
+            var cs = Win32Gatt.GetCharacteristics(_handle, s);
+            allChars.AddRange(cs);
+            foreach (var c in cs)
+            {
+                if (Win32Gatt.UuidMatches(c.CharacteristicUuid, HuamiProtocol.CharChunkedWrite2021)) _write16 = c;
+                if (Win32Gatt.UuidMatches(c.CharacteristicUuid, HuamiProtocol.CharChunkedRead2021)) _read17 = c;
+            }
+            if (_write16 != null && _read17 != null) break;
+        }
+        _log($"Chars seen: {string.Join(", ", allChars.Select(c => c.CharacteristicUuid.ToString()))}");
+        if (_write16 is null) throw new InvalidOperationException($"Huami 0x0016 write char missing (chars: {string.Join(", ", allChars.Select(c => c.CharacteristicUuid))}). Try --family xiaomi for FE95 bands (7 Pro/8 Active).");
+        if (_read17 is null) throw new InvalidOperationException($"Huami 0x0017 notify char missing (chars: {string.Join(", ", allChars.Select(c => c.CharacteristicUuid))}).");
         EnableNotify(_read17.Value, ct);
         _log("Huami connected, notify on 0x0017.");
     }

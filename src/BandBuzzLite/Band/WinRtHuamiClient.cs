@@ -43,35 +43,44 @@ internal sealed class WinRtHuamiClient : ZeppOsSession
         if ((GattStatus)svcRes.GetStatus() != GattStatus.Success) throw new InvalidOperationException($"GATT discovery failed: {(GattStatus)svcRes.GetStatus()}");
 
         var svcVec = WinRt.QueryWrap<IVecServices>(svcRes.GetServices(), WinRtIids.VecServices);
-        nint? fee1 = null, svc3512 = null;
+        var seenSvcs = new List<Guid>();
         for (uint i = 0; i < svcVec.GetSize(); i++)
         {
             svcVec.GetAt(i, out var svcPtr);
-            var uuid = WinRt.QueryWrap<IService1>(svcPtr, WinRtIids.Service1).GetUuid();
-            if (uuid == HuamiProtocol.ServiceFee1) fee1 = svcPtr;
-            if (uuid == HuamiProtocol.ServiceFtg) svc3512 = svcPtr;
+            seenSvcs.Add(WinRt.QueryWrap<IService1>(svcPtr, WinRtIids.Service1).GetUuid());
         }
-        var targetSvc = fee1 ?? svc3512;
-        if (targetSvc is null) throw new InvalidOperationException("Huami service FEE1/3512 not found – not a Zepp OS device. Plain Band 7 family uses FEE1/3512, not FE95.");
+        _log($"GATT services found: {string.Join(", ", seenSvcs)}");
+        var hasFee1 = seenSvcs.Contains(HuamiProtocol.ServiceFee1);
+        var has3512 = seenSvcs.Contains(HuamiProtocol.ServiceFtg);
+        if (!hasFee1 && !has3512)
+            throw new InvalidOperationException($"Huami service FEE1/3512 not found (seen {string.Join(", ", seenSvcs)}). Not a Zepp OS device – try --family xiaomi for FE95 bands (7 Pro/8 Active). Band MAC {_mac} services: {string.Join(", ", seenSvcs)}");
 
-        // Prefer 3512 for chunked chars; if only FEE1 fetch from there too
-        var svcToUse = svc3512 ?? fee1!.Value;
-        var svc3 = WinRt.QueryWrap<IService3>(svcToUse, WinRtIids.Service3);
-        var chOp = svc3.GetCharacteristicsAsync();
-        await WinRt.WaitOpAsync(chOp, WinRtIids.OpCharacteristics, "GetCharacteristicsAsync", TimeSpan.FromSeconds(15), ct);
-        var chRes = WinRt.Wrap<ICharacteristicsResult>(WinRt.Wrap<IOpCharacteristics>(chOp).GetResults());
-        if ((GattStatus)chRes.GetStatus() != GattStatus.Success) throw new InvalidOperationException($"Char discovery failed: {(GattStatus)chRes.GetStatus()}");
-
-        var chVec = WinRt.QueryWrap<IVecCharacteristics>(chRes.GetCharacteristics(), WinRtIids.VecCharacteristics);
-        for (uint i = 0; i < chVec.GetSize(); i++)
+        // Brute-force all services for 0x0016/0x0017 – they live under 00001530 on Zepp OS but search all to tolerate variants
+        var allSeenChars = new List<Guid>();
+        for (uint si = 0; si < svcVec.GetSize(); si++)
         {
-            chVec.GetAt(i, out var chPtr);
-            var uuid = WinRt.QueryWrap<ICharacteristic1>(chPtr, WinRtIids.Characteristic1).GetUuid();
-            if (uuid == HuamiProtocol.CharChunkedWrite2021) { _charWrite2021 = chPtr; _charWrite2021V3 = WinRt.Query(chPtr, new Guid(WinRtIids.Characteristic3)); }
-            if (uuid == HuamiProtocol.CharChunkedRead2021) _charRead2021 = chPtr;
+            svcVec.GetAt(si, out var svcPtr);
+            var svc3x = WinRt.QueryWrap<IService3>(svcPtr, WinRtIids.Service3);
+            var chOpx = svc3x.GetCharacteristicsAsync();
+            await WinRt.WaitOpAsync(chOpx, WinRtIids.OpCharacteristics, "GetCharacteristicsAsync", TimeSpan.FromSeconds(10), ct);
+            var chResx = WinRt.Wrap<ICharacteristicsResult>(WinRt.Wrap<IOpCharacteristics>(chOpx).GetResults());
+            if ((GattStatus)chResx.GetStatus() != GattStatus.Success) continue;
+            var chVecx = WinRt.QueryWrap<IVecCharacteristics>(chResx.GetCharacteristics(), WinRtIids.VecCharacteristics);
+            for (uint ci = 0; ci < chVecx.GetSize(); ci++)
+            {
+                chVecx.GetAt(ci, out var chPtr);
+                var uuid = WinRt.QueryWrap<ICharacteristic1>(chPtr, WinRtIids.Characteristic1).GetUuid();
+                allSeenChars.Add(uuid);
+                if (uuid == HuamiProtocol.CharChunkedWrite2021) { _charWrite2021 = chPtr; _charWrite2021V3 = WinRt.Query(chPtr, new Guid(WinRtIids.Characteristic3)); }
+                if (uuid == HuamiProtocol.CharChunkedRead2021) _charRead2021 = chPtr;
+            }
+            if (_charWrite2021 != 0 && _charRead2021 != 0) break;
         }
-        if (_charWrite2021 == 0) throw new InvalidOperationException("Huami 0x0016 write char missing");
-        if (_charRead2021 == 0) throw new InvalidOperationException("Huami 0x0017 notify char missing");
+        _log($"GATT chars seen: {string.Join(", ", allSeenChars.Distinct())}");
+        if (_charWrite2021 == 0)
+            throw new InvalidOperationException($"Huami 0x0016 write char missing (seen chars: {string.Join(", ", allSeenChars.Distinct())}). If band is Xiaomi FE95 (7 Pro/8 Active) use --family xiaomi.");
+        if (_charRead2021 == 0)
+            throw new InvalidOperationException($"Huami 0x0017 notify char missing (seen chars: {string.Join(", ", allSeenChars.Distinct())}).");
 
         _vcHandler = new ValueHandler(OnValueChanged);
         _vcCcw = WinRt.ComInterfaceFor(_vcHandler, WinRtIids.ValueHandler);
