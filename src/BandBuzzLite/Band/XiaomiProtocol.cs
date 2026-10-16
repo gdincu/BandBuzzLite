@@ -9,7 +9,7 @@ namespace BandBuzzLite.Band;
 ///   • Xiaomi Smart Band 8 / 8 Pro / 9 / 9 Pro, Redmi Smart Band 2 / Pro,
 ///     Redmi Watch 3/4/5 series etc. (see XiaomiUuids.BLE_UUIDS["0000fe95-..."]).
 /// Plain "Xiaomi Smart Band 7" (no Pro) is Zepp OS / Huami (HuamiConst.XIAOMI_SMART_BAND7_NAME,
-/// ZeppOsSupport + endpoint 0x001e) – different BLE stack and NOT covered here.
+/// ZeppOsSupport + endpoint 0x001e) – see HuamiProtocol + ZeppOsSession for that family.
 /// </summary>
 internal static class XiaomiProtocol
 {
@@ -36,7 +36,7 @@ internal static class XiaomiProtocol
 
     public static readonly string UnsupportedHuamiBand7Note =
         "Plain 'Xiaomi Smart Band 7' (no 'Pro') is Huami/Zepp OS (Gadgetbridge: huami/miband7/MiBand7Coordinator → ZeppOsCoordinator) – " +
-        "it uses a different BLE stack (endpoints, file transfer, 0x001e notifications) and is not supported by this FE95 transport.";
+        "use DeviceFamily=huami (FEE1/3512, HuamiProtocol + ZeppOsSession, endpoint 0x001e) instead of FE95.";
 
     public const int AuthType = 1;
     public const int CmdNonce = 26;

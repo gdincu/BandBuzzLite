@@ -7,9 +7,9 @@ namespace BandBuzzLite.Band;
 
 /// <summary>
 /// Xiaomi BLE link for FE95 encrypted bands (Band 8 Active, Band 7 Pro, Band 8/9/...).
-/// Owns ONE connection. Plain Mi Band 7 (Huami/Zepp OS) is NOT an FE95 device – see XiaomiProtocol.
+/// Owns ONE connection. For plain Mi Band 7 (Huami/Zepp OS, FEE1/3512) see ZeppOsSession + HuamiProtocol.
 /// </summary>
-internal abstract class XiaomiSession : IDisposable
+internal abstract class XiaomiSession : IBandSession
 {
     protected readonly string _mac;
     protected readonly byte[] _secret;

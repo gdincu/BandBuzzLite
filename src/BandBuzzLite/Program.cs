@@ -1,6 +1,5 @@
-// BandBuzzLite: sub-800KB notifier for Xiaomi FE95 bands
-// (Smart Band 8 Active, 7 Pro, 8/9/... – all Gadgetbridge Xiaomi family).
-// Plain "Band 7" (Huami/Zepp OS, no Pro) is NOT compatible – different stack.
+// BandBuzzLite: dual-stack notifier – Xiaomi FE95 (Band 8 Active/7 Pro/8/9...) + Huami/Zepp OS (Band 7 plain + Amazfit family).
+// Gadgetbridge: xiaomi/*Coordinator (FE95) vs huami/miband7/MiBand7Coordinator (Zepp Os, FEE1/3512, endpoint 0x001e).
 // Sends one-shot cards unpackaged; watch/--list need the identity package
 // (install.ps1) for toast access. No Microsoft.Windows.SDK.NET.dll anywhere:
 // WinRT comes from hand-rolled raw interop (Band/WinRt*.cs).
@@ -69,6 +68,15 @@ internal static class Program
                 case "--filter" when i + 1 < args.Length:
                     cfg.Filters = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
                     break;
+                case "--family" when i + 1 < args.Length:
+                    cfg.DeviceFamily = args[++i].ToLowerInvariant();
+                    break;
+                case "--huami":
+                    cfg.DeviceFamily = "huami";
+                    break;
+                case "--xiaomi":
+                    cfg.DeviceFamily = "xiaomi";
+                    break;
             }
         }
     }
@@ -81,6 +89,9 @@ internal static class Program
         var hasIdentity = ToastWatcher.HasPackageIdentity();
         Console.WriteLine($"Package identity: {(hasIdentity ? "(present - toast access available)" : "(none - unpackaged run)")}");
         Console.WriteLine($"Toast access: {await ToastWatcher.ProbeAccessAsync()}");
+        Console.WriteLine($"Family: {cfg.DeviceFamily} (xiaomi=FE95 0000fe95/0x51/0x52, huami=Zepp OS FEE1/3512 endpoint 0x001e)");
+        Console.WriteLine($"  Xiaomi: {string.Join(", ", XiaomiProtocol.SupportedDeviceExamples.Take(2))}...");
+        Console.WriteLine($"  Huami : {string.Join(", ", HuamiProtocol.SupportedHuamiExamples.Take(2))}...");
         Console.WriteLine("Transport default: raw WinRT (no WinRT projection DLL)");
         Console.WriteLine($"WinRT BLE stack: {WinRtBandClient.ProbeStack()}");
         try
@@ -141,7 +152,7 @@ internal static class Program
         var app = rest.ElementAtOrDefault(2) ?? "Chrome";
         var (nid, package, appName) = SlotFor(app);
 
-        using XiaomiSession band = MakeBand(cfg, args);
+        using IBandSession band = MakeBand(cfg, args);
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -157,10 +168,19 @@ internal static class Program
         return 0;
     }
 
-    private static XiaomiSession MakeBand(Config cfg, string[] args) =>
-        args.Contains("--win32")
+    private static IBandSession MakeBand(Config cfg, string[] args)
+    {
+        var family = cfg.DeviceFamily.ToLowerInvariant();
+        var win32 = args.Contains("--win32");
+        if (family == "huami" || family == "zeppos")
+            return win32
+                ? new Win32HuamiClient(cfg.Mac, cfg.AuthKey, Console.WriteLine) { MaxWrite = cfg.MaxWrite, Mtu = cfg.MaxWrite + 3 }
+                : new WinRtHuamiClient(cfg.Mac, cfg.AuthKey, Console.WriteLine) { MaxWrite = cfg.MaxWrite, Mtu = cfg.MaxWrite + 3 };
+        // default xiaomi FE95
+        return win32
             ? new Win32BandClient(cfg.Mac, cfg.AuthKey, Console.WriteLine) { MaxWrite = cfg.MaxWrite }
             : new WinRtBandClient(cfg.Mac, cfg.AuthKey, Console.WriteLine) { MaxWrite = cfg.MaxWrite };
+    }
 
     private static async Task<int> ListAsync(Config cfg)
     {
@@ -188,7 +208,7 @@ internal static class Program
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
         var ct = cts.Token;
 
-        using XiaomiSession band = MakeBand(cfg, args);
+        using IBandSession band = MakeBand(cfg, args);
         using var watcher = new ToastWatcher(cfg.Filters, TimeSpan.FromSeconds(cfg.DedupSeconds), Log);
 
         var queue = Channel.CreateBounded<ToastItem>(new BoundedChannelOptions(16)
@@ -217,7 +237,7 @@ internal static class Program
         return 0;
     }
 
-    private static async Task SendLoopAsync(XiaomiSession band, ChannelReader<ToastItem> reader, Config cfg, CancellationToken ct)
+    private static async Task SendLoopAsync(IBandSession band, ChannelReader<ToastItem> reader, Config cfg, CancellationToken ct)
     {
         await foreach (var t in reader.ReadAllAsync(ct))
         {
@@ -241,7 +261,7 @@ internal static class Program
         }
     }
 
-    private static async Task ConnectWithRetryAsync(XiaomiSession band, Config cfg, CancellationToken ct)
+    private static async Task ConnectWithRetryAsync(IBandSession band, Config cfg, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -275,12 +295,15 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine("""
-            BandBuzzLite - sub-800KB notifier for Xiaomi FE95 bands.
-            Supported: Xiaomi Smart Band 8 Active (primary), 7 Pro, 8, 8 Pro, 9/9 Pro,
-                       Redmi Smart Band 2/Pro, Redmi Watch 3/4/5 ... any FE95 Xiaomi band.
-                       Plain "Band 7" (no Pro, Zepp OS/Huami) is NOT compatible – different BLE stack.
-            Gadgetbridge refs: devices/xiaomi/*Coordinator.java + service/devices/xiaomi/XiaomiUuids.java (FE95),
-                               huami/miband7/MiBand7Coordinator.java (Zepp OS, unsupported here).
+            BandBuzzLite - dual-stack notifier: Xiaomi FE95 + Huami/Zepp OS.
+            Supported:
+              FE95 (xiaomi): Smart Band 8 Active (primary), 7 Pro, 8/8 Pro, 9/9 Pro,
+                             Redmi Smart Band 2/Pro, Redmi Watch 3/4/5 ... any 0000fe95 band
+              Zepp OS (huami): Mi Band 7 plain (MiBand7Coordinator, sources 260/262..), Amazfit Band 7,
+                               Bip 5/Unity, GTR 3/4, GTS 3/4, T-Rex 2/3/Ultra, Falcon, Cheetah, Balance...
+                               (any FEE1/3512 + endpoint 0x001e device)
+            Gadgetbridge refs: devices/xiaomi/*Coordinator + XiaomiUuids (FE95) vs huami/miband7/MiBand7Coordinator
+                               + zeppos/ZeppOsSupport + ZeppOsNotificationService (0x001e) + Huami2021ChunkedEncoder
             Usage:
               BandBuzzLite                        watch + forward (needs the installed app - install.ps1)
               BandBuzzLite --list                 dump current toasts (tune --filter)
@@ -290,11 +313,14 @@ internal static class Program
               BandBuzzLite --diag                 environment + access troubleshooter
               BandBuzzLite --scan                 list known Bluetooth devices (find the MAC)
             Options:
-              --mac AA:BB:CC:DD:EE:FF   --key <32hex>   --filter Chrome,Teams   --win32 (legacy transport)
-            Config: appsettings.json next to the exe (same keys).
+              --mac AA:BB:CC:DD:EE:FF   --key <32hex>   --filter Chrome,Teams
+              --family xiaomi|huami  (--huami / --xiaomi shorthands)   --win32 (legacy GATT)
+            Config: appsettings.json next to the exe (same keys + DeviceFamily).
+                    DeviceFamily xiaomi (default, FE95) or huami (Zepp OS, FEE1/3512).
             Packaging: toast access needs the identity package - run install.ps1 once (see README).
             First run: no pairing needed - the default transport scans for the
             band's advertisements directly (like the full BandBuzz app).
+            Family auto-advice: if you get "FE95 service not found" try --huami; FEE1/3512 not found try --xiaomi.
             """);
     }
 }

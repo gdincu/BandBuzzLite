@@ -19,6 +19,8 @@ internal sealed class Config
     public int DedupSeconds { get; set; } = 10;
     public int ReconnectSeconds { get; set; } = 5;
     public int MaxWrite { get; set; } = 244;
+    // xiaomi (FE95: Band 7 Pro, 8 Active/8/9...) or huami (Zepp OS: Band 7 plain, Amazfit family)
+    public string DeviceFamily { get; set; } = "xiaomi";
 
     public static Config Load(string? path = null)
     {

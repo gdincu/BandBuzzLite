@@ -118,7 +118,48 @@ internal static class SelfTest
         Check(XiaomiProtocol.CharCommandWrite == Guid.Parse("00000052-0000-1000-8000-00805f9b34fb"), "char-52-uuid");
         Check(XiaomiProtocol.SupportedDeviceExamples.Length >= 6, "supported-list");
         Check(XiaomiProtocol.SupportedDeviceExamples.Any(s => s.Contains("7 Pro")), "supported-7pro");
-        Check(XiaomiProtocol.UnsupportedHuamiBand7Note.Contains("Zepp OS"), "unsupported-note");
+        Check(XiaomiProtocol.UnsupportedHuamiBand7Note.Contains("huami"), "unsupported-note");
+
+        // 11. Huami/Zepp OS family: FEE1/3512 + endpoint 0x001e (Mi Band 7 plain etc).
+        Check(HuamiProtocol.ServiceFee1 == Guid.Parse("0000fee1-0000-1000-8000-00805f9b34fb"), "huami-fee1-uuid");
+        Check(HuamiProtocol.CharChunkedWrite2021 == Guid.Parse("00000016-0000-3512-2118-0009af100700"), "huami-0016-uuid");
+        Check(HuamiProtocol.CharChunkedRead2021 == Guid.Parse("00000017-0000-3512-2118-0009af100700"), "huami-0017-uuid");
+        Check(HuamiProtocol.EndpointNotification == 0x001e, "huami-endpoint-notif");
+        Check(HuamiProtocol.EndpointAuth == 0x0082, "huami-endpoint-auth");
+        Check(HuamiProtocol.SupportedHuamiExamples.Any(s => s.Contains("Band 7")), "huami-supported-band7");
+        Check(HuamiProtocol.MiBand7Name == "Xiaomi Smart Band 7", "huami-miband7-name");
+        // Huami frame + Zepp OS proto shape
+        {
+            var zeppNotif = ZeppOsProto.BuildNotification("Hi", "Body", "com.test", "Test", 123);
+            Check(zeppNotif[0] == 0x03 && BitConverter.ToInt32(zeppNotif, 1) == 123 && zeppNotif[5] == 0xFA, "zepp-notif-shape");
+            var caps = ZeppOsProto.BuildCapabilitiesRequest();
+            Check(caps.Length == 1 && caps[0] == 0x01, "zepp-caps-shape");
+        }
+        // Huami crypto: AES-ECB roundtrip + CRC32 + ECDH B-163 pub generation
+        {
+            var huamiKey = new byte[16]; for (var i = 0; i < 16; i++) huamiKey[i] = (byte)i;
+            var huamiPlain = new byte[16]; for (var i = 0; i < 16; i++) huamiPlain[i] = (byte)(i * 2);
+            var huamiEnc = HuamiFrame.AesEcbEncrypt(huamiPlain, huamiKey);
+            var huamiDec = HuamiFrame.AesEcbDecrypt(huamiEnc, huamiKey);
+            Check(huamiDec.SequenceEqual(huamiPlain), "huami-aes-ecb-roundtrip");
+            var huamiPayload = "hello huami"u8.ToArray();
+            var huamiEnc2 = new HuamiFrame.Encoder { Mtu = 247 };
+            huamiEnc2.SetEncryptionParameters(12345, huamiKey);
+            var huamiChunks = huamiEnc2.Encode(0x001e, huamiPayload, true, true);
+            Check(huamiChunks.Count >= 1 && huamiChunks[0][0] == 0x03, "huami-chunked-encode");
+            var huamiDec2 = new HuamiFrame.Decoder(true);
+            huamiDec2.SetEncryptionParameters(huamiKey);
+            byte[]? huamiReassembled = null;
+            foreach (var c in huamiChunks) { var r = huamiDec2.Decode(c); if (r != null) huamiReassembled = r.Value.payload; }
+            Check(huamiReassembled != null && huamiReassembled.SequenceEqual(huamiPayload), "huami-chunked-roundtrip");
+            var (huamiPrv, huamiPub) = HuamiCrypto.GenerateKeyPair();
+            Check(huamiPrv.Length == 24 && huamiPub.Length == 48, "huami-ecdh-keypair-size");
+            var huamiRemotePrv = HuamiCrypto.RandomPrivateEC();
+            var huamiRemotePub = EcdhB163.GeneratePublic(huamiRemotePrv)!;
+            var huamiShared1 = EcdhB163.GenerateShared(huamiPrv, huamiRemotePub)!;
+            var huamiShared2 = EcdhB163.GenerateShared(huamiRemotePrv, huamiPub)!;
+            Check(huamiShared1.AsSpan(0, 24).SequenceEqual(huamiShared2.AsSpan(0, 24)), "huami-ecdh-shared");
+        }
 
         Console.WriteLine(failures == 0 ? "SELFTEST OK" : $"SELFTEST {failures} FAILURE(S)");
         return failures == 0 ? 0 : 1;
